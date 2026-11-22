@@ -1,0 +1,12 @@
+{
+  "label": "clinic-08",
+  "port": 7608,
+  "login_url": "http://127.0.0.1:7608/login",
+  "http_status": 200,
+  "checks": [
+    "含登录相关文案",
+    "含密码表单线索"
+  ],
+  "passed": true,
+  "checked_at": "2026-11-23T03:08:44+08:00"
+}
