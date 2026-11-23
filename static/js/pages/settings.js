@@ -33,6 +33,16 @@ export async function renderSettings(el) {
       <div id="msg" class="muted" style="margin-top:10px"></div>
     </div>
     <div class="card">
+      <h2>配额闸口径</h2>
+      <p class="muted">本台只展配额闸口径，不另开平行口径。落地形态：甲侧旁路凭证 + 指纹链。</p>
+      <ul class="muted">
+        <li>写侧：开批 / 抓取 / 追加统一过闸，<code>BEGIN IMMEDIATE</code> 串行化，整批预占不足即整笔拦截。</li>
+        <li>落点：每次过闸写 <code>quota_ledger</code> 一条凭证，附 HMAC 指纹并与上一条成链，随后立即复核封存。</li>
+        <li>读侧：只认本条凭证，<code>gate_key</code> 唯一拒回刷；指纹或链对不齐即驳回。</li>
+        <li>徽标对账：批次计数器汇总（徽标）必须等于实时访视行（已用配额），拧花即拦。</li>
+      </ul>
+    </div>
+    <div class="card">
       <h2>预留切口（后续题面）</h2>
       <ul class="muted">
         <li>访视行跨中心去重策略与冲突裁决面板</li>

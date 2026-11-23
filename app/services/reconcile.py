@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.db import get_db
 from app.services import audit as audit_svc
+from app.services import quota_gate as gate_svc
 from app.services.errors import ServiceError
 
 
@@ -173,11 +174,13 @@ def site_gap_matrix(db_path: str | None = None) -> list[dict]:
     with get_db(db_path) as conn:
         rows = conn.execute(
             """
-            SELECT s.id, s.site_code, s.name, s.status,
+            SELECT s.id, s.site_code, s.name, s.status, s.quota,
               COUNT(DISTINCT b.id) AS batch_count,
-              COUNT(r.id) AS row_count,
-              SUM(CASE WHEN r.quality!='合格' AND r.status IN ('待检','待补采') THEN 1 ELSE 0 END) AS gap_count,
-              SUM(CASE WHEN f.status='开放' THEN 1 ELSE 0 END) AS open_findings
+              COUNT(DISTINCT r.id) AS row_count,
+              COUNT(DISTINCT CASE WHEN r.quality!='合格' AND r.status IN ('待检','待补采') THEN r.id END) AS gap_count,
+              COUNT(DISTINCT CASE WHEN f.status='开放' THEN f.id END) AS open_findings,
+              (SELECT COALESCE(SUM(b2.item_count),0) FROM visit_batches b2 WHERE b2.site_id=s.id) AS quota_badge,
+              (SELECT COUNT(*) FROM quota_ledger q WHERE q.site_id=s.id) AS gate_count
             FROM trial_sites s
             LEFT JOIN visit_batches b ON b.site_id=s.id
             LEFT JOIN visit_rows r ON r.batch_id=b.id
@@ -186,4 +189,15 @@ def site_gap_matrix(db_path: str | None = None) -> list[dict]:
             ORDER BY s.id
             """
         ).fetchall()
-        return [dict(r) for r in rows]
+        items = []
+        for r in rows:
+            item = dict(r)
+            used = item.get("row_count") or 0
+            badge = item.get("quota_badge") or 0
+            item["quota_badge"] = badge
+            item["quota_used"] = used
+            item["quota_remaining"] = max(0, (item.get("quota") or 0) - used)
+            item["badge_matches"] = badge == used
+            item["quota_full"] = used >= (item.get("quota") or 0)
+            items.append(item)
+        return items

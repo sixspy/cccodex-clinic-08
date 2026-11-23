@@ -13,6 +13,7 @@ from app.services import audit as audit_svc
 from app.services import backfill as backfill_svc
 from app.services import protocols as protocols_svc
 from app.services import qc as qc_svc
+from app.services import quota_gate as gate_svc
 from app.services import reconcile as reconcile_svc
 from app.services import settings as settings_svc
 from app.services import sites as sites_svc
@@ -208,6 +209,37 @@ class Api:
     def site_counts(self):
         _require()
         return _json(sites_svc.status_counts())
+
+    @cherrypy.expose
+    @_wrap
+    def quota_gates(self, gate_key=None):
+        _require()
+        method = cherrypy.request.method
+        q = _query()
+        if gate_key is not None:
+            if method != "GET":
+                return _json({"error": "方法不允许"}, 405)
+            return _json(gate_svc.verify_gate(gate_key))
+        if method == "GET":
+            site_id = int(q["site_id"]) if q.get("site_id") else None
+            return _json(
+                {
+                    "items": gate_svc.list_ledger(
+                        site_id=site_id, status=q.get("status")
+                    ),
+                    "summary": gate_svc.summary(site_id=site_id),
+                    "caliber": gate_svc.CALIBER,
+                }
+            )
+        return _json({"error": "方法不允许"}, 405)
+
+    @cherrypy.expose
+    @_wrap
+    def quota_matrix(self):
+        _require()
+        if cherrypy.request.method != "GET":
+            return _json({"error": "方法不允许"}, 405)
+        return _json({"items": gate_svc.quota_matrix()})
 
     @cherrypy.expose
     @_wrap
@@ -467,6 +499,13 @@ class ApiMount:
             return api.dashboard()
         if path in ("/site-counts",) or path == "site-counts":
             return api.site_counts()
+        if path in ("/quota-matrix",) or path == "quota-matrix":
+            return api.quota_matrix()
+        if path == "/quota-gates" or path.startswith("/quota-gates/"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 1:
+                return api.quota_gates()
+            return api.quota_gates(gate_key=parts[1])
         if path == "/sites" or path.startswith("/sites/"):
             parts = path.strip("/").split("/")
             if len(parts) == 1:

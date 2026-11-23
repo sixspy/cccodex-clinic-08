@@ -53,10 +53,17 @@ export async function renderVisits(el) {
     </div>`;
 
   function batchRow(b) {
+    const badge = !b.badge_matches
+      ? `<span class="chip bad" title="徽标 ${b.site_quota_badge} ≠ 已用 ${b.site_quota_used}">徽标失衡</span>`
+      : b.site_quota_full
+        ? '<span class="chip bad">配额已满</span>'
+        : `<span class="chip ok">余 ${b.site_quota_remaining}</span>`;
     return `
       <tr>
         <td>${escapeHtml(b.batch_code)}</td>
-        <td>${escapeHtml(b.site_name || '')}</td>
+        <td>${escapeHtml(b.site_name || '')}
+          <div class="muted">配额 ${b.site_quota_used}/${b.site_quota} ${badge}</div>
+        </td>
         <td>${escapeHtml((b.protocol_code || '-') + (b.protocol_version ? '@' + b.protocol_version : ''))}</td>
         <td>${chip(b.status)}</td>
         <td>${b.item_count}</td>
@@ -89,6 +96,13 @@ export async function renderVisits(el) {
         <div class="stat"><div class="n">${b.gap_count}</div><div class="l">缺口行</div></div>
         <div class="stat"><div class="n">${qs['合格'] || 0}</div><div class="l">合格</div></div>
         <div class="stat"><div class="n">${(qs['缺字段'] || 0) + (qs['编码空'] || 0) + (qs['重复键'] || 0)}</div><div class="l">异常质量</div></div>
+      </div>
+      <div class="row">
+        <span class="chip ${b.badge_matches ? 'ok' : 'bad'}">
+          配额徽标 ${b.site_quota_badge} · 已用 ${b.site_quota_used} / ${b.site_quota}
+        </span>
+        <span class="chip ${b.site_quota_full ? 'bad' : 'ok'}">剩余 ${b.site_quota_remaining}</span>
+        <span class="muted">配额闸甲侧：旁路凭证 + 指纹链。抓取整批预占，不足即整笔拦截。</span>
       </div>
       <div class="row">
         <input id="subjectKey" placeholder="受试者键" />

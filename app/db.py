@@ -103,6 +103,26 @@ CREATE TABLE IF NOT EXISTS app_settings (
   label TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS quota_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  gate_key TEXT NOT NULL UNIQUE,
+  site_id INTEGER NOT NULL REFERENCES trial_sites(id),
+  batch_id INTEGER REFERENCES visit_batches(id),
+  action TEXT NOT NULL,
+  units INTEGER NOT NULL DEFAULT 0,
+  used_before INTEGER NOT NULL DEFAULT 0,
+  used_after INTEGER NOT NULL DEFAULT 0,
+  quota_total INTEGER NOT NULL DEFAULT 0,
+  badge_used INTEGER NOT NULL DEFAULT 0,
+  prev_fingerprint TEXT NOT NULL DEFAULT '',
+  fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('占用','已封存','已驳回')),
+  note TEXT NOT NULL DEFAULT '',
+  actor TEXT NOT NULL DEFAULT 'admin',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  sealed_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -121,12 +141,22 @@ def ensure_db() -> Path:
 
 
 @contextmanager
-def get_db(db_path: str | Path | None = None):
+def get_db(db_path: str | Path | None = None, immediate: bool = False):
+    """Open a SQLite connection.
+
+    ``immediate=True`` opens a write transaction with ``BEGIN IMMEDIATE`` so
+    that concurrent readers cannot both read the same state and then both
+    write on top of it (the quota gate's read-check-write must be serialised).
+    """
     path = Path(db_path) if db_path else Config.DATABASE_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=8000")
+    if immediate:
+        conn.isolation_level = None
+        conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn
         conn.commit()

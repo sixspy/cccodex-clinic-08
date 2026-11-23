@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.db import get_db
 from app.services import audit as audit_svc
+from app.services import quota_gate as gate_svc
 from app.services.errors import ServiceError
 
 VALID_STATUS = ("启用", "停用", "观察")
@@ -16,7 +17,10 @@ def list_sites(db_path: str | None = None, status: str | None = None) -> list[di
                 """
                 SELECT s.*,
                   (SELECT COUNT(*) FROM visit_batches b WHERE b.site_id=s.id) AS batch_count,
-                  (SELECT COALESCE(SUM(b.gap_count),0) FROM visit_batches b WHERE b.site_id=s.id) AS gap_total
+                  (SELECT COALESCE(SUM(b.gap_count),0) FROM visit_batches b WHERE b.site_id=s.id) AS gap_total,
+                  (SELECT COUNT(*) FROM visit_rows r JOIN visit_batches b ON b.id=r.batch_id WHERE b.site_id=s.id) AS quota_used,
+                  (SELECT COALESCE(SUM(b.item_count),0) FROM visit_batches b WHERE b.site_id=s.id) AS quota_badge,
+                  (SELECT COUNT(*) FROM quota_ledger q WHERE q.site_id=s.id) AS gate_count
                 FROM trial_sites s
                 WHERE s.status=?
                 ORDER BY s.id
@@ -28,12 +32,26 @@ def list_sites(db_path: str | None = None, status: str | None = None) -> list[di
                 """
                 SELECT s.*,
                   (SELECT COUNT(*) FROM visit_batches b WHERE b.site_id=s.id) AS batch_count,
-                  (SELECT COALESCE(SUM(b.gap_count),0) FROM visit_batches b WHERE b.site_id=s.id) AS gap_total
+                  (SELECT COALESCE(SUM(b.gap_count),0) FROM visit_batches b WHERE b.site_id=s.id) AS gap_total,
+                  (SELECT COUNT(*) FROM visit_rows r JOIN visit_batches b ON b.id=r.batch_id WHERE b.site_id=s.id) AS quota_used,
+                  (SELECT COALESCE(SUM(b.item_count),0) FROM visit_batches b WHERE b.site_id=s.id) AS quota_badge,
+                  (SELECT COUNT(*) FROM quota_ledger q WHERE q.site_id=s.id) AS gate_count
                 FROM trial_sites s
                 ORDER BY s.id
                 """
             ).fetchall()
-        return [dict(r) for r in rows]
+        items = []
+        for r in rows:
+            item = dict(r)
+            used = item.get("quota_used") or 0
+            badge = item.get("quota_badge") or 0
+            item["quota_used"] = used
+            item["quota_badge"] = badge
+            item["quota_remaining"] = max(0, item["quota"] - used)
+            item["quota_full"] = used >= item["quota"]
+            item["badge_matches"] = badge == used
+            items.append(item)
+        return items
 
 
 def get_site(site_id: int, db_path: str | None = None) -> dict:
@@ -59,9 +77,27 @@ def get_site(site_id: int, db_path: str | None = None) -> dict:
             """,
             (site_id,),
         ).fetchone()["c"]
+        cap = gate_svc.capacity(site_id, conn)
+        gates = conn.execute(
+            """
+            SELECT id, gate_key, batch_id, action, units, used_before, used_after,
+                   quota_total, badge_used, status, note, created_at
+            FROM quota_ledger
+            WHERE site_id=?
+            ORDER BY id DESC
+            LIMIT 20
+            """,
+            (site_id,),
+        ).fetchall()
         data = dict(row)
         data["batches"] = [dict(b) for b in batches]
         data["open_gaps"] = open_gaps
+        data["quota_used"] = cap["used"]
+        data["quota_badge"] = cap["badge"]
+        data["quota_remaining"] = cap["remaining"]
+        data["quota_full"] = cap["full"]
+        data["badge_matches"] = cap["badge_matches"]
+        data["gates"] = [dict(g) for g in gates]
         return data
 
 

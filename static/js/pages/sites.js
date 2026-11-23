@@ -1,18 +1,32 @@
 import { api, chip, escapeHtml } from '../api.js';
 
+function quotaBadge(s) {
+  if (!s.badge_matches) {
+    return `<span class="chip bad" title="徽标 ${s.quota_badge} ≠ 已用 ${s.quota_used}">徽标失衡</span>`;
+  }
+  if (s.quota_full) {
+    return `<span class="chip bad">配额已满</span>`;
+  }
+  return `<span class="chip ok">余 ${s.quota_remaining}</span>`;
+}
+
 export async function renderSites(el) {
-  const [data, counts, protocols] = await Promise.all([
+  const [data, counts, protocols, gates, matrix] = await Promise.all([
     api('/api/sites'),
     api('/api/site-counts'),
     api('/api/protocols'),
+    api('/api/quota-gates'),
+    api('/api/quota-matrix'),
   ]);
   const items = data.items || [];
   const activeProto = (protocols.items || []).find((p) => p.status === '生效');
+  const gateSummary = gates.summary || {};
+  const matrixItems = matrix.items || [];
 
   el.innerHTML = `
     <div class="card">
       <h2>试验中心目录</h2>
-      <p class="muted">登记临床试验中心、启停状态与访视抓取配额。停用前须先结束采集中批次。</p>
+      <p class="muted">登记临床试验中心、启停状态与访视抓取配额。配额闸按「甲侧旁路凭证 + 指纹链」口径落点；停用前须先结束采集中批次。</p>
       <div class="grid">
         <div class="stat"><div class="n">${counts.total || 0}</div><div class="l">中心总数</div></div>
         <div class="stat"><div class="n">${counts['启用'] || 0}</div><div class="l">启用</div></div>
@@ -30,6 +44,33 @@ export async function renderSites(el) {
       <p class="muted">当前生效方案：${activeProto ? escapeHtml(activeProto.title + ' @ ' + activeProto.version) : '无'}</p>
     </div>
     <div class="card">
+      <h2>配额闸摘要台</h2>
+      <p class="muted">${escapeHtml(gates.caliber || '')}</p>
+      <div class="grid">
+        <div class="stat"><div class="n">${(gateSummary['已封存'] || {}).count || 0}</div><div class="l">已封存落点</div></div>
+        <div class="stat"><div class="n">${(gateSummary['占用'] || {}).count || 0}</div><div class="l">占用中</div></div>
+        <div class="stat"><div class="n">${(gateSummary['已驳回'] || {}).count || 0}</div><div class="l">已驳回</div></div>
+        <div class="stat"><div class="n">${gateSummary.total || 0}</div><div class="l">落点合计</div></div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>中心</th><th>配额</th><th>徽标(计数器)</th><th>已用配额</th><th>剩余</th><th>徽标对账</th><th>落点</th></tr>
+        </thead>
+        <tbody>
+          ${matrixItems.map((m) => `
+            <tr>
+              <td>${escapeHtml(m.site_code)} · ${escapeHtml(m.name)}</td>
+              <td>${m.quota}</td>
+              <td>${m.badge}</td>
+              <td>${m.used}</td>
+              <td>${m.remaining}</td>
+              <td>${m.badge_matches ? '<span class="chip ok">对齐</span>' : '<span class="chip bad">拧花</span>'}</td>
+              <td>${m.gate_count}</td>
+            </tr>`).join('') || '<tr><td colspan="7" class="muted">暂无中心</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
       <div class="row">
         <select id="filterStatus">
           <option value="">全部状态</option>
@@ -42,7 +83,8 @@ export async function renderSites(el) {
       <table>
         <thead>
           <tr>
-            <th>编码</th><th>名称</th><th>状态</th><th>配额</th>
+            <th>编码</th><th>名称</th><th>状态</th><th>配额</th><th>已用配额</th>
+            <th>配额徽标</th><th>落点</th>
             <th>批次</th><th>缺口合计</th><th>区域/负责人</th><th>操作</th>
           </tr>
         </thead>
@@ -56,6 +98,9 @@ export async function renderSites(el) {
               </td>
               <td>${chip(s.status)}</td>
               <td>${s.quota}</td>
+              <td>${s.quota_used}</td>
+              <td>${quotaBadge(s)}</td>
+              <td>${s.gate_count || 0}</td>
               <td>${s.batch_count}</td>
               <td>${s.gap_total}</td>
               <td>${escapeHtml(s.region || '-')} / ${escapeHtml(s.principal || '-')}</td>
@@ -69,7 +114,7 @@ export async function renderSites(el) {
             </tr>`).join('')}
         </tbody>
       </table>
-      <div id="siteDetail" class="detail-box" style="margin-top:12px">选择一行查看批次明细。</div>
+      <div id="siteDetail" class="detail-box" style="margin-top:12px">选择一行查看批次明细与配额闸落点。</div>
     </div>
     <div class="card">
       <h2>方案版本</h2>
@@ -135,6 +180,9 @@ export async function renderSites(el) {
         <td>${escapeHtml(s.name)}</td>
         <td>${chip(s.status)}</td>
         <td>${s.quota}</td>
+        <td>${s.quota_used}</td>
+        <td>${quotaBadge(s)}</td>
+        <td>${s.gate_count || 0}</td>
         <td>${s.batch_count}</td>
         <td>${s.gap_total}</td>
         <td>${escapeHtml(s.region || '-')} / ${escapeHtml(s.principal || '-')}</td>
@@ -171,17 +219,47 @@ export async function renderSites(el) {
     btn.onclick = async () => {
       try {
         const detail = await api(`/api/sites/${btn.dataset.detail}`);
-        el.querySelector('#siteDetail').textContent = JSON.stringify({
-          中心: detail.name,
-          状态: detail.status,
-          开放缺口: detail.open_gaps,
-          批次: (detail.batches || []).map((b) => ({
-            编码: b.batch_code,
-            状态: b.status,
-            行数: b.item_count,
-            缺口: b.gap_count,
-          })),
-        }, null, 2);
+        const box = el.querySelector('#siteDetail');
+        box.innerHTML = `
+          <div class="row">
+            <strong>${escapeHtml(detail.site_code)} · ${escapeHtml(detail.name)}</strong>
+            ${chip(detail.status)}
+            <span class="chip ${detail.badge_matches ? 'ok' : 'bad'}">
+              徽标 ${detail.quota_badge} / 已用 ${detail.quota_used} / 配额 ${detail.quota}
+            </span>
+            <span class="chip ${detail.quota_full ? 'bad' : 'ok'}">剩余 ${detail.quota_remaining}</span>
+          </div>
+          <p class="muted">开放缺口 ${detail.open_gaps}。</p>
+          <h3 style="font-size:14px;margin:8px 0 4px">配额闸落点</h3>
+          <table>
+            <thead><tr><th>凭证</th><th>动作</th><th>占用</th><th>已用→</th><th>配额</th><th>徽标</th><th>状态</th><th>时间</th></tr></thead>
+            <tbody>
+              ${(detail.gates || []).map((g) => `
+                <tr>
+                  <td>${escapeHtml(g.gate_key)}</td>
+                  <td>${escapeHtml(g.action)}</td>
+                  <td>${g.units}</td>
+                  <td>${g.used_before} → ${g.used_after}</td>
+                  <td>${g.quota_total}</td>
+                  <td>${g.badge_used}</td>
+                  <td>${chip(g.status)}</td>
+                  <td class="muted">${escapeHtml(g.created_at || '')}</td>
+                </tr>`).join('') || '<tr><td colspan="8" class="muted">尚无配额闸落点</td></tr>'}
+            </tbody>
+          </table>
+          <h3 style="font-size:14px;margin:8px 0 4px">批次明细</h3>
+          <table>
+            <thead><tr><th>编码</th><th>状态</th><th>行数</th><th>缺口</th></tr></thead>
+            <tbody>
+              ${(detail.batches || []).map((b) => `
+                <tr>
+                  <td>${escapeHtml(b.batch_code)}</td>
+                  <td>${chip(b.status)}</td>
+                  <td>${b.item_count}</td>
+                  <td>${b.gap_count}</td>
+                </tr>`).join('') || '<tr><td colspan="4" class="muted">暂无批次</td></tr>'}
+            </tbody>
+          </table>`;
       } catch (e) { errBox(e.message); }
     };
   });

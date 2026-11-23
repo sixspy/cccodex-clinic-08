@@ -26,9 +26,11 @@ export async function renderReconcile(el) {
     </div>
     <div class="card">
       <h2>中心缺口矩阵</h2>
+      <p class="muted">并排展示配额徽标（批次计数器汇总）与已用配额（实时访视行），以及配额闸落点数。</p>
       <table>
         <thead>
-          <tr><th>中心</th><th>状态</th><th>批次</th><th>访视行</th><th>缺口</th><th>开放发现</th></tr>
+          <tr><th>中心</th><th>状态</th><th>批次</th><th>访视行</th><th>缺口</th><th>开放发现</th>
+              <th>配额</th><th>徽标</th><th>已用配额</th><th>剩余</th><th>徽标对账</th><th>落点</th></tr>
         </thead>
         <tbody>
           ${(matrix.items || []).map((s) => `
@@ -39,6 +41,12 @@ export async function renderReconcile(el) {
               <td>${s.row_count}</td>
               <td>${s.gap_count || 0}</td>
               <td>${s.open_findings || 0}</td>
+              <td>${s.quota}</td>
+              <td>${s.quota_badge}</td>
+              <td>${s.quota_used}</td>
+              <td>${s.quota_remaining}</td>
+              <td>${s.badge_matches ? '<span class="chip ok">对齐</span>' : '<span class="chip bad">拧花</span>'}</td>
+              <td>${s.gate_count || 0}</td>
             </tr>`).join('')}
         </tbody>
       </table>
